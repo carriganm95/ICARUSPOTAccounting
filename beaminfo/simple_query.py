@@ -1,8 +1,19 @@
-import urllib.request, sys, os
+import urllib.request, urllib.error, sys, os, time
 
 import numpy as np
 
 beamdburl = os.environ["beamdburl"]
+
+def _urlopen_with_retry(url, retries=3, delay=10):
+    for attempt in range(1, retries + 1):
+        try:
+            return urllib.request.urlopen(url)
+        except urllib.error.HTTPError as e:
+            if e.code == 504 and attempt < retries:
+                print(f'WARNING: HTTP 504 (attempt {attempt}/{retries}), retrying in {delay}s ...')
+                time.sleep(delay)
+            else:
+                raise
 
 def parse_line(line):
 #  print('line',line)
@@ -29,7 +40,11 @@ def query_beam_livetime( t0, t1, device_name, event, min_pot=0.1 ):
   """
   url = "%s/data?v=%s&e=e,%s&t0=%d&t1=%d&f=csv" % (beamdburl, device_name, event, t0, t1)
 
-  f = urllib.request.urlopen(url)
+  try:
+    f = _urlopen_with_retry(url)
+  except urllib.error.HTTPError as e:
+    print(f'WARNING: HTTP {e.code} for {url} — returning 0.0 beam livetime')
+    return 0.
 
   timestamps = []
   for i, line in enumerate(f):
@@ -58,7 +73,11 @@ def query_pot_interval( t0, t1, device_name, event, debug=False ):
   if debug:
     print( "URL:", url )
 
-  f = urllib.request.urlopen(url)
+  try:
+    f = _urlopen_with_retry(url)
+  except urllib.error.HTTPError as e:
+    print(f'WARNING: HTTP {e.code} for {url} — returning (0, 0)')
+    return 0., 0
 
   if debug:
     print( "Status code: %s\n" % (f.getcode(),) )
@@ -81,7 +100,11 @@ def query_full_day_pot(ts_start, ts_end, device_name, event, debug=False ):
   if debug:
     print( "URL:", url )
 
-  f = urllib.request.urlopen(url)
+  try:
+    f = _urlopen_with_retry(url)
+  except urllib.error.HTTPError as e:
+    print(f'WARNING: HTTP {e.code} for {url} — returning (0, 0)')
+    return 0., 0
 
   if debug:
     print( "Status code: %s\n" % (f.getcode(),) )
@@ -105,7 +128,11 @@ def get_full_day_horncurrent(ts_start, ts_end, device_name, event, debug=False )
 
   print(url)
 
-  f = urllib.request.urlopen(url)
+  try:
+    f = _urlopen_with_retry(url)
+  except urllib.error.HTTPError as e:
+    print(f'WARNING: HTTP {e.code} for {url} — returning 0.0 avg current')
+    return 0.
 
   if debug:
     print( "Status code: %s\n" % (f.getcode(),) )
