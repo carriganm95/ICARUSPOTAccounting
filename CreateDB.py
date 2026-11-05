@@ -3,7 +3,7 @@ import time
 import datetime
 import numpy as np
 
-from utils.dbmanager import add_run_day_pot, add_run_pot, create_connection, create_table
+from utils.dbmanager import add_run_day_pot, add_run_pot, create_connection, create_table, add_column_if_missing
 from beaminfo.simple_query import query_pot_interval
 from runinfo.read_run_info import make_timestamp, parse_line
 
@@ -27,6 +27,9 @@ spill_bnb_collected INTEGER NOT NULL,
 pot_numi_collected REAL NOT NULL,
 spill_numi_collected INTEGER NOT NULL,
 runtime REAL NOT NULL,
+runtime_all REAL NOT NULL DEFAULT 0,
+beam_on_time_bnb_physics REAL NOT NULL DEFAULT 0,
+beam_on_time_numi_physics REAL NOT NULL DEFAULT 0,
 UNIQUE( day )
   ); """
 
@@ -36,6 +39,7 @@ day text PRIMARY KEY,
 pot real NOT NULL,
 spill integer NOT NULL,
 mode text NOT NULL,
+beam_on_time real NOT NULL DEFAULT 0,
 UNIQUE( day )
 ); """
 
@@ -44,6 +48,7 @@ day text PRIMARY KEY,
 pot real NOT NULL,
 spill integer NOT NULL,
 mode text NOT NULL,
+beam_on_time real NOT NULL DEFAULT 0,
 UNIQUE( day )
 ); """
 
@@ -51,3 +56,9 @@ create_table( conn, create_run_timestamp )
 create_table( conn, create_daily_collected_pot )
 create_table( conn, create_day_pot_bnb )
 create_table( conn, create_day_pot_numi )
+
+# Retrofit columns added after the table already existed on disk (CREATE TABLE
+# IF NOT EXISTS above is a no-op once the table is there, so new columns need
+# an explicit, idempotent ALTER TABLE).
+add_column_if_missing( conn, "daily_collected_pot", "beam_on_time_bnb_physics", "REAL NOT NULL DEFAULT 0" )
+add_column_if_missing( conn, "daily_collected_pot", "beam_on_time_numi_physics", "REAL NOT NULL DEFAULT 0" )

@@ -12,6 +12,42 @@ def parse_line(line):
 #  print('buff',buff)
   return float(buff[5])
 
+def parse_line_with_time(line):
+  # CSV columns: Event,Variable,Clock(ms),Units,Value
+  # "e,<event>" is quoted so splits into buff[0]="e  buff[1]=<event>"
+  # buff[3] = clock in milliseconds, buff[4] = units, buff[5] = value
+  line = ( line.strip() ).decode('utf-8')
+  buff = line.split(",")
+  return float(buff[3]) / 1000.0, float(buff[5])
+
+
+def query_beam_livetime( t0, t1, device_name, event, min_pot=0.1 ):
+  """
+  Compute beam-on time (seconds) from real spill count × median cycle time.
+  min_pot (E12 units) filters Booster RF noise (~5e-4 E12) and accelerator
+  studies (max ~0.02 E12) from real physics beam (~4.5 E12 for BNB).
+  """
+  url = "%s/data?v=%s&e=e,%s&t0=%d&t1=%d&f=csv" % (beamdburl, device_name, event, t0, t1)
+
+  f = urllib.request.urlopen(url)
+
+  timestamps = []
+  for i, line in enumerate(f):
+    if i == 0:
+      continue
+    ts, pot = parse_line_with_time(line)
+    if pot > min_pot:
+      timestamps.append(ts)
+
+  if len(timestamps) < 2:
+    return 0.
+
+  timestamps = np.sort(timestamps)
+  median_interval = float(np.median(np.diff(timestamps)))
+  beam_on_time = len(timestamps) * median_interval
+  print(f'beam livetime {device_name}: n_real_spills={len(timestamps)} cycle={median_interval:.3f}s beam_on={beam_on_time:.1f}s')
+  return beam_on_time
+
 
 def query_pot_interval( t0, t1, device_name, event, debug=False ):
 
@@ -119,5 +155,8 @@ def query_full_day( ts_start_day, ts_end_day, beam ):
     elif hc<0:
       mode = "nubar"
 
-  return [pot, spill, mode]
+  ## beam-on time from spill timestamps
+  beam_on_time = query_beam_livetime(ts_start_day, ts_end_day, pot_db_device, pot_db_event)
+
+  return [pot, spill, mode, beam_on_time]
   

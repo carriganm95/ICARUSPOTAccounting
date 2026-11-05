@@ -53,8 +53,8 @@ dbname = "%s/dbase/RunSummary.db"%(potDir)
 conn = create_connection(dbname)
 
 pot_run_collected = pd.read_sql( "SELECT * from daily_collected_pot", conn )
-pot_daily_bnb = pd.read_sql( "SELECT * from day_pot_bnb", conn )
-pot_daily_numi = pd.read_sql( "SELECT * from day_pot_numi", conn )
+pot_daily_bnb = pd.read_sql( "SELECT day, pot, spill, mode FROM day_pot_bnb", conn )
+pot_daily_numi = pd.read_sql( "SELECT day, pot, spill, mode FROM day_pot_numi", conn )
 
 conn.close()
 

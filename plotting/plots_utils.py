@@ -97,60 +97,91 @@ def potCumulative(df: pd.DataFrame, beams: list[str], range):
 
 def daqEfficiency(pot_daily_collected, range):
 
-  fig, ax = plt.subplots(figsize=(8, 5.5))
+  fig, axs = plt.subplots(figsize=(12, 7), nrows=2, height_ratios=[3, 2], sharex=True)
+  fig.subplots_adjust(hspace=0.08)
+  ax0, ax1 = axs
   start, end = range
 
-  norm=3600.*24.
+  norm = 3600. * 24.
+  dates = pd.to_datetime(pot_daily_collected['day'], utc=True)
 
-  ax.plot(
-      pd.to_datetime(pot_daily_collected['day'], utc=True), 
-      pot_daily_collected['runtime']/norm, 
-      '-.', linewidth=5, label='DAQ Uptime')
+  # --- top panel: time fractions ---
+  ax0.plot(dates, pot_daily_collected['runtime_all'] / norm,
+           '-.', linewidth=4, color='steelblue',    label='DAQ uptime (any config)')
+  ax0.plot(dates, pot_daily_collected['beam_on_time_bnb'] / norm,
+           '-',  linewidth=3, color='#9EDE73',
+           marker='o', markersize=6, markeredgecolor='black', markeredgewidth=1,
+           label='BNB beam time')
+  ax0.plot(dates, pot_daily_collected['beam_on_time_numi'] / norm,
+           '-',  linewidth=3, color='#BE0000',
+           marker='^', markersize=6, markeredgecolor='black', markeredgewidth=1,
+           label='NuMI beam time')
+  ax0.plot(dates, pot_daily_collected['runtime'] / norm,
+           '-',  linewidth=3, color='darkorange',   label='DAQ uptime (physics config)')
 
-  nDays = (pd.to_datetime(end, utc=True ) - pd.to_datetime(start, utc=True )).days + 1
-  totalRunTime = np.sum(pot_daily_collected['runtime'])/norm
-    
+  ax0.yaxis.grid(True, linestyle='dashed')
+  ax0.set_ylim(0.0, 1.1)
+  ax0.set_ylabel('Fraction of 24 hr', fontsize=14)
+  ax0.legend(fontsize=12, ncols=2)
+
+  # --- bottom panel: POT ratio and time ratio ---
+  bnb_pot_frac  = pot_daily_collected['ratio_bnb'].where(pot_daily_collected['pot_bnb_delivered']  > 0)
+  numi_pot_frac = pot_daily_collected['ratio_numi'].where(pot_daily_collected['pot_numi_delivered'] > 0)
+
+  bnb_time_denom  = pot_daily_collected['beam_on_time_bnb'].replace(0, float('nan'))
+  numi_time_denom = pot_daily_collected['beam_on_time_numi'].replace(0, float('nan'))
+  bnb_time_frac  = pot_daily_collected['runtime'].clip(upper=pot_daily_collected['beam_on_time_bnb'])  / bnb_time_denom
+  numi_time_frac = pot_daily_collected['runtime'].clip(upper=pot_daily_collected['beam_on_time_numi']) / numi_time_denom
+
+  ax1.plot(dates, bnb_pot_frac,
+           'o', markersize=10, markerfacecolor='#9EDE73',
+           markeredgecolor='black', markeredgewidth=1.5,
+           label='BNB POT collected / delivered')
+  ax1.plot(dates, numi_pot_frac,
+           '^', markersize=10, markerfacecolor='#BE0000',
+           markeredgecolor='black', markeredgewidth=1.5,
+           label='NuMI POT collected / delivered')
+  ax1.plot(dates, bnb_time_frac,
+           'o', markersize=10, markerfacecolor='none',
+           markeredgecolor='#9EDE73', markeredgewidth=2,
+           label='BNB uptime collected / total')
+  ax1.plot(dates, numi_time_frac,
+           '^', markersize=10, markerfacecolor='none',
+           markeredgecolor='#BE0000', markeredgewidth=2,
+           label='NuMI uptime collected / total')
+
+  ax1.yaxis.grid(True, linestyle='dashed')
+  ax1.set_ylim(-0.05, 1.1)
+  ax1.set_ylabel('Collected / total', fontsize=14)
+  ax1.set_xlabel('Day (UTC)', fontsize=14)
+  ax1.legend(fontsize=12)
+
+  ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b %d %Y, %a'))
+  ax1.tick_params(axis='x', rotation=25)
+  plt.setp(ax1.get_xticklabels(), ha='right')
+
+  buf = timedelta(days=0.7)
+  ax0.set_xlim(pd.to_datetime(start, utc=True) - buf, pd.to_datetime(end, utc=True) + buf)
+
+  nDaysRequested = (pd.to_datetime(end, utc=True) - pd.to_datetime(start, utc=True)).days + 1
+  # Use the number of days actually present in the DB as the denominator: a requested
+  # day (e.g. "today", still in progress) with no row yet would otherwise silently dilute
+  # the uptime fractions below, since it contributes 0 to the sum but was still counted
+  # in a date-arithmetic day count.
+  nDays = pot_daily_collected['day'].nunique()
+  totalRunTimeAll  = np.sum(pot_daily_collected['runtime_all']) / norm
+  totalPhysicsTime = np.sum(pot_daily_collected['runtime']) / norm
+  totalBNBfrac  = pot_daily_collected['pot_bnb_collected'].sum()  / pot_daily_collected['pot_bnb_delivered'].sum()  if pot_daily_collected['pot_bnb_delivered'].sum()  > 0 else float('nan')
+  totalNuMIfrac = pot_daily_collected['pot_numi_collected'].sum() / pot_daily_collected['pot_numi_delivered'].sum() if pot_daily_collected['pot_numi_delivered'].sum() > 0 else float('nan')
+
   print('@@ DAQ efficiency')
-  print(f'- Number of days between {start} and {end} = {nDays}')
-  print(f'- Total run time in this period = {totalRunTime:1.2f} days')
-  print(f'- DAQ efficiency = (DAQ running time)/(Time interval) = {totalRunTime/float(nDays):1.3f}')
-  
-  ax.yaxis.grid(True, linestyle='dashed')
+  print(f'- Number of days between {start} and {end} = {nDaysRequested} ({nDays} with data in the DB)')
+  print(f'- DAQ uptime (any config) / calendar time = {totalRunTimeAll/float(nDays):1.3f}')
+  print(f'- DAQ uptime (physics config) / calendar time = {totalPhysicsTime/float(nDays):1.3f}')
+  print(f'- BNB POT collected / delivered  = {totalBNBfrac:1.3f}')
+  print(f'- NuMI POT collected / delivered = {totalNuMIfrac:1.3f}')
 
-  ax.set_ylim((0.0, 1.1))
-  ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d %Y, %a'))
-  ax.tick_params(axis='x', rotation=25)
-  plt.setp(ax.get_xticklabels(), ha='right')
-# # Optional: Ensure labels are aligned correctly
-# p
-  ax.set_ylabel('DAQ Time / 24 hours', fontsize=16)
-
-  ax1 = ax.twinx()
-
-  ax1.plot(
-    pd.to_datetime(pot_daily_collected['day'], utc=True), 
-    pot_daily_collected['ratio_bnb'], 
-    'o', markersize=14, markerfacecolor='#9EDE73', 
-    markeredgecolor='black', markeredgewidth=2, 
-    label='BNB Efficiency'
-  )
-  ax1.plot(
-    pd.to_datetime(pot_daily_collected['day'], utc=True), 
-    pot_daily_collected['ratio_numi'], 
-    '^', markersize=14, markerfacecolor='#BE0000', 
-    markeredgecolor='black', markeredgewidth=2,
-    label='NuMI Efficiency'
-  )
-
-  ax1.set_ylim((0.0, 1.1))
-  ax1.set_ylabel('POT collected / POT delivered', fontsize=16)
-  ax1.set_xlabel('Day (UTC)', fontsize=16)
-
-  ax.legend(fontsize=17)
-
-  ax.set_xlim(pd.to_datetime(start, utc=True), pd.to_datetime(end, utc=True))
   fig.tight_layout()
-
   return fig
 
 def intensityAndCumulativePot(df, beam, range):
@@ -530,7 +561,7 @@ def intensityAndCumulativePot(df, beam, range):
 
 #     return plt
 
-def makeCumulativePOTPlot( df, rrun1, rrun2, rrun3, rrun4, rrun5 ):
+def makeCumulativePOTPlot( df, rrun1, rrun2, rrun3, rrun4, rrun5, rrun6 ):
 
     fig, ax0 = plt.subplots( 1,1, figsize=(18, 5.5), sharey=True )
 
@@ -553,9 +584,10 @@ def makeCumulativePOTPlot( df, rrun1, rrun2, rrun3, rrun4, rrun5 ):
     _selRUN3 = ( df.timeindex >= pd.to_datetime( rrun3[0], utc=True ) ) & ( df.timeindex <= pd.to_datetime( rrun3[1], utc=True ) )
     _selRUN4 = ( df.timeindex >= pd.to_datetime( rrun4[0], utc=True ) ) & ( df.timeindex <= pd.to_datetime( rrun4[1], utc=True ) )
     _selRUN5 = ( df.timeindex >= pd.to_datetime( rrun5[0], utc=True ) ) & ( df.timeindex <= pd.to_datetime( rrun5[1], utc=True ) )
+    _selRUN6 = ( df.timeindex >= pd.to_datetime( rrun6[0], utc=True ) ) & ( df.timeindex <= pd.to_datetime( rrun6[1], utc=True ) )
 
     # SELECT ONLY INSIDE THE THREE "RUN" PERIODS
-    df = df[ _selRUN1 | _selRUN2 | _selRUN3 | _selRUN4 | _selRUN5 ]
+    df = df[ _selRUN1 | _selRUN2 | _selRUN3 | _selRUN4 | _selRUN5 | _selRUN6 ]
 
     x=df["timeindex"].values
 
@@ -586,7 +618,7 @@ def makeCumulativePOTPlot( df, rrun1, rrun2, rrun3, rrun4, rrun5 ):
 
     ax0.legend(fontsize=16, loc='upper left', edgecolor='none', facecolor='white', framealpha=0.8, frameon=True)
 
-    ax0.set_xlim( pd.to_datetime( rrun1[0], utc=True ) - timedelta(days=15), pd.to_datetime( rrun5[1], utc=True ) + timedelta(days=15) )
+    ax0.set_xlim( pd.to_datetime( rrun1[0], utc=True ) - timedelta(days=15), pd.to_datetime( rrun6[1], utc=True ) + timedelta(days=15) )
     ax0.grid(alpha=0.5,linestyle="dashed")
 
     # Run1 
@@ -623,11 +655,16 @@ def makeCumulativePOTPlot( df, rrun1, rrun2, rrun3, rrun4, rrun5 ):
     
     # Run5
     ax0.axvline( x=pd.to_datetime(rrun5[0], utc=True), linestyle="dashed",color="black")
-    # ax0.axvline( x=pd.to_datetime(rrun4[1], utc=True), linestyle="dashed",color="black")
+    ax0.axvline( x=pd.to_datetime(rrun5[1], utc=True), linestyle="dashed",color="black")
     ax0.text(x=pd.to_datetime(rrun5[0], utc=True) + timedelta(days=3), y=0.5, s='Start RUN-5', rotation=90,
              fontsize=12, va="bottom")
-    # ax0.text(x=pd.to_datetime(rrun4[1], utc=True) + timedelta(days=3), y=1, s='End RUN-4', rotation=90,
-    #          fontsize=12, va="bottom")
+    ax0.text(x=pd.to_datetime(rrun5[1], utc=True) + timedelta(days=3), y=0.5, s='End RUN-5', rotation=90,
+             fontsize=12, va="bottom")
+
+    # Run6
+    ax0.axvline( x=pd.to_datetime(rrun6[0], utc=True), linestyle="dashed",color="black")
+    ax0.text(x=pd.to_datetime(rrun6[0], utc=True) + timedelta(days=3), y=0.5, s='Start RUN-6', rotation=90,
+             fontsize=12, va="bottom")
 
     plt.tight_layout()
 
